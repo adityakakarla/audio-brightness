@@ -1,6 +1,7 @@
 use crate::brightness::set_brightness;
 use cpal::Device;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::collections::VecDeque;
 use std::f32::NAN;
 use std::io::stdin;
 use std::panic;
@@ -52,8 +53,8 @@ fn main() {
 
     let mut min_audio = NAN;
     let mut max_audio = NAN;
-    let mut audio_levels: Vec<f32> = Vec::new();
-    let mut audio_levels_ptr = &audio_levels;
+    let duration = 10;
+    let mut audio_levels: VecDeque<f32> = VecDeque::new();
 
     let stream = user_device
         .build_input_stream(
@@ -65,19 +66,35 @@ fn main() {
                 }
                 let average = total_sum / data.len() as f32;
 
-                if min_audio.is_nan() && max_audio.is_nan() {
-                    min_audio = average;
-                    max_audio = average;
-                    set_brightness(0.5);
-                } else if average < min_audio {
-                    min_audio = average;
-                    set_brightness(0.25);
-                } else if average > max_audio {
-                    max_audio = average;
-                    set_brightness(0.75);
+                if audio_levels.len() < duration {
+                    audio_levels.push_back(average);
                 } else {
-                    let scaled_value = (average - min_audio) / (max_audio - min_audio);
-                    set_brightness(scaled_value);
+                    audio_levels.pop_front();
+                    let mut audio_over_duration_sum = 0.0;
+
+                    for (i, audio_level) in audio_levels.iter().enumerate() {
+                        audio_over_duration_sum += audio_level * ((i as f32) + 1.0)
+                    }
+
+                    let scaled_count = (audio_levels.len() * (audio_levels.len() + 1)) / 2;
+
+                    let final_audio_level = audio_over_duration_sum / (scaled_count as f32);
+
+                    if min_audio.is_nan() && max_audio.is_nan() {
+                        min_audio = final_audio_level;
+                        max_audio = final_audio_level;
+                        set_brightness(0.5);
+                    } else if final_audio_level < min_audio {
+                        min_audio = final_audio_level;
+                        set_brightness(0.25);
+                    } else if final_audio_level > max_audio {
+                        max_audio = final_audio_level;
+                        set_brightness(0.75);
+                    } else {
+                        let scaled_value =
+                            (final_audio_level - min_audio) / (max_audio - min_audio);
+                        set_brightness(scaled_value);
+                    }
                 }
             },
             move |err| {
